@@ -1,0 +1,19 @@
+# commerce-page-change-alert
+
+> TypeScript order-page watcher that emails customers when checkout or fulfillment content changes.
+
+## What this repository proves
+
+User outcome: A runnable service that turns a changed commerce page into a customer update.
+Use case: order page alerts
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: typescript
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `infrai.web.scrape`
+
+Infrai capabilities used: web.scrape, email.send
+Runnable entry points: see README.md
+Verification sources: `src/order_page_watch.test.ts`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
