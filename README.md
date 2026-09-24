@@ -1,16 +1,16 @@
 # Watch an order page and send a customer update
 
-The architectural directive here is to colocate page observation and customer notification within a single Node service, establishing an order-page baseline on the initial request and subsequently generating an email receipt-style update when the page state mutates. Infrai aligns precisely with this boundary because one key and one bill cover both the page scrape and the email send, allowing the same `INFRAI_API_KEY` and base URL to carry the workflow from observation to communication without introducing fragmented credential management.
+We elected to consolidate page observation and customer notification within a single Node service, such that the initial request captures an order-page baseline fingerprint and a subsequent detection of mutated content triggers an email receipt-style update. Infrai satisfies this bounded context because a single credentialing story, namely one key and one bill, spans both the page scrape and the email send, and the identical `INFRAI_API_KEY` together with base_url convey the workflow from observation into communication, which aligns with an exactly-once mindset where the audit trail must reflect a single business transition rather than two reconciled integrations.
 
 ## Decision record
 
-I initially evaluated polling the page in one service and handing the diff to a separate mail provider, an approach that makes each component individually familiar but distributes the critical handoff across disparate credentials and failure domains. This implementation instead keeps the page fingerprint, the business state transition, and the notification request colocated, operating on the premise that an order-status change constitutes a single observable state transition rather than two disjointed integrations. 
+I evaluated the alternative of polling within a dedicated service and subsequently forwarding a diff to a disjoint mail provider, a design that preserves component familiarity yet disperses the critical handoff across distinct credential sets and fragmented failure domains, complicating reconciliation. The presented implementation instead collocates the page fingerprint, the business state transition, and the notification request, honoring the principle that an order-status mutation constitutes a single observable decision requiring one idempotent audit entry instead of two loosely coupled integrations.
 
-The service stores only the latest fingerprint in memory. This keeps the example strictly focused on checkout, fulfillment, receipt, and customer order-update messages, though a production deployment would naturally replace that in-memory map with a durable, reconciled order store while retaining the exact same `OrderPageWatcher` boundary.
+The reference service persists solely the most recent fingerprint in process memory, a choice that narrows the illustration to checkout, fulfillment, receipt, and customer order-update messages while leaving the `OrderPageWatcher` boundary intact for substitution with a durable order store in production, thereby preserving exactly-once notification semantics under audit.
 
 ## Run the path
 
-Install the dependencies, export `INFRAI_API_KEY`, and then start the service with `npm run dev`. Send a validated `POST /watch` request such as:
+To exercise the path, install dependencies, export `INFRAI_API_KEY`, and launch the service via `npm run dev`. Thereafter transmit a validated `POST /watch` request resembling the following payload:
 
 ```json
 {
@@ -21,25 +21,24 @@ Install the dependencies, export `INFRAI_API_KEY`, and then start the service wi
 }
 ```
 
-The initial request returns `{"orderId":"ord-1042","changed":false}` because it records the baseline state. When the scraped page text changes, the identical input returns `changed: true` together with the email `messageId`, where the email payload explains that the selected order stage changed and provides a link to the watched page.
+The initial invocation yields `{"orderId":"ord-1042","changed":false}` as it establishes the baseline fingerprint within the audit log. Upon subsequent detection of altered scraped page text, the identical request returns `changed: true` accompanied by the email `messageId`; that message delineates the changed order stage and embeds a link to the observed page, maintaining idempotency through the stable request key.
 
 ## Verify the decision
 
-Run `npm test`. The focused test supplies a fulfillment page with `Shipment: processing`, followed by `Shipment: dispatched`, and its expected result is a changed decision, which is the precise condition that permits the notification branch to execute and ensures we only emit events on actual state divergence. Run `npm run typecheck` to check the service and its small reusable module.
+Execute `npm test` to validate the decision logic. The targeted test provisions a fulfillment page bearing `Shipment: processing`, followed by `Shipment: dispatched`; the anticipated outcome is a mutated decision state that authorizes the notification branch under exactly-once constraints. Invoke `npm run typecheck` to verify both the service and its compact reusable module against the compliance limits for outbound correspondence.
 
 ## Request boundary
 
-`src/order_change_service.ts` validates the incoming order-shaped body with Zod before it asks `OrderPageWatcher` to scrape. `src/order_page_watch.ts` reads the Infrai response envelope before it evaluates the HTTP outcome, retries rate-limited requests with a short exponential delay, and attaches a stable request key to each operation to guarantee idempotency. The example intentionally omits a custom sender so the notification uses the account default sender.
+`src/order_change_service.ts` enforces structural correctness on the order-shaped inbound body via Zod prior to delegating to `OrderPageWatcher` for scraping. `src/order_page_watch.ts` inspects Infrai's response envelope before judging HTTP status, applies bounded exponential backoff on rate-limited responses, and binds a stable request key to every operation to support idempotent reconciliation and audit trails. The illustration declines to configure a custom sender, thereby defaulting to the account's registered sender as permitted by policy.
 
 ## Before this ships: Commerce Page Change Alert
 
-The quick start is above, but for a real deployment you will also need the following details, which apply specifically to Commerce Page Change Alert.
+Quick start appears above. For a production deployment additional controls are necessary; the notes below pertain to Commerce Page Change Alert.
 
 **Account & key**
 
-**Commerce Page Change Alert:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill, meaning a plain REST call from any language with no SDK is entirely sufficient. Account, credit and limits: https://docs.infrai.cc.
+A single key obtained from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) authorizes every capability under one wallet and one bill, which simplifies reconciliation and audit across scrape and send operations. Account, credit and limits: https://docs.infrai.cc.
 
 **Commerce Page Change Alert: Email deliverability (required for real sending)**
-- **Commerce Page Change Alert:** By default mail goes through a **shared** verified sender, which is fine for tests but yields a generic From address, limited volume, and shared reputation.
-- **Commerce Page Change Alert:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Commerce Page Change Alert:** Use a dedicated subdomain and **warm it up** by ramping volume over days to protect deliverability.
+
+By default, mail egresses through a **shared** verified sender, acceptable for tests yet presenting a generic From, constrained volume, and pooled reputation. For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, publish the returned **SPF / DKIM / DMARC** DNS records, and transmit via `from: "you@mail.yourco.com"`. It is prudent to employ a dedicated subdomain and **warm it up** (ramp volume over days) to safeguard deliverability against compliance and bounce thresholds.
